@@ -1,133 +1,232 @@
+# Azure DevOps Pipeline for WordPress deployment to AKS
 trigger:
-- main
+  branches:
+    include:
+    - main
+  paths:
+    include:
+    - kubernetes-manifests/*
+    - azure-pipelines.yml
+
+variables:
+  # Azure Resource Manager connection name
+  azureServiceConnection: 'Test-AzureRM-Connection'
+  # Kubernetes service connection name
+  kubernetesServiceConnection: 'aks-kubernetes-svc'
+  # AKS cluster details
+  aksClusterName: 'ar-aks-cluster'
+  resourceGroupName: 'Scaleops-ResourceGroup'
+  # Kubernetes namespace
+  kubernetesNamespace: 'wordpress'
+  # Azure subscription
+  azureSubscription: '31a50802-420f-4807-abbf-dc56f9b7cec0'
 
 pool:
   vmImage: 'ubuntu-latest'
 
-variables:
-  HELM_CHART_PATH: 'helm-charts'
-  NAMESPACE: 'wordpress'
-
 stages:
-- stage: Build
-  displayName: 'Build and Package Helm Charts'
+- stage: Validate
+  displayName: 'Validate Kubernetes Manifests'
   jobs:
-  - job: PackageHelmCharts
-    displayName: 'Package Helm Charts'
+  - job: ValidateManifests
+    displayName: 'Validate YAML Files'
     steps:
-    - task: HelmInstaller@0
-      displayName: 'Install Helm'
-      inputs:
-        helmVersion: 'latest'
-    
     - task: Bash@3
-      displayName: 'Validate Helm Charts'
+      displayName: 'Validate YAML Syntax'
       inputs:
         targetType: 'inline'
         script: |
-          echo "Validating MySQL Helm Chart..."
-          helm lint $(HELM_CHART_PATH)/mysql
-          
-          echo "Validating WordPress Helm Chart..."
-          helm lint $(HELM_CHART_PATH)/wordpress
-    
-    - task: PublishBuildArtifacts@1
-      displayName: 'Publish Helm Charts as Artifacts'
-      inputs:
-        pathToPublish: '$(HELM_CHART_PATH)'
-        artifactName: 'helm-charts'
-        publishLocation: 'Container'
+          echo "Validating YAML files..."
+          for file in kubernetes-manifests/*.yaml; do
+            echo "Validating $file"
+            python -c "import yaml; yaml.safe_load(open('$file'))"
+          done
+          echo "All YAML files are valid!"
 
 - stage: Deploy
-  displayName: 'Deploy Helm Charts to AKS'
-  dependsOn: Build
+  displayName: 'Deploy to AKS'
+  dependsOn: Validate
   condition: succeeded()
   jobs:
-  - job: DeployToAKS
-    displayName: 'Deploy to AKS Cluster'
+  - deployment: DeployWordPress
+    displayName: 'Deploy WordPress to AKS'
+    environment: 'AKS-Production'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+          
+          - task: AzureCLI@2
+            displayName: 'Get AKS Credentials'
+            inputs:
+              azureSubscription: '$(azureServiceConnection)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Getting AKS credentials..."
+                az aks get-credentials --resource-group $(resourceGroupName) --name $(aksClusterName) --overwrite-existing
+                
+                echo "Verifying cluster connection..."
+                kubectl cluster-info
+                
+                echo "Checking cluster nodes..."
+                kubectl get nodes
+
+          - task: KubernetesManifest@0
+            displayName: 'Create/Update Namespace'
+            inputs:
+              action: 'deploy'
+              kubernetesServiceConnection: '$(kubernetesServiceConnection)'
+              namespace: '$(kubernetesNamespace)'
+              manifests: |
+                kubernetes-manifests/namespace.yaml
+
+          - task: KubernetesManifest@0
+            displayName: 'Deploy MySQL'
+            inputs:
+              action: 'deploy'
+              kubernetesServiceConnection: '$(kubernetesServiceConnection)'
+              namespace: '$(kubernetesNamespace)'
+              manifests: |
+                kubernetes-manifests/mysql.yaml
+
+          - task: Bash@3
+            displayName: 'Wait for MySQL to be Ready'
+            inputs:
+              targetType: 'inline'
+              script: |
+                echo "Waiting for MySQL deployment to be ready..."
+                kubectl wait --for=condition=available --timeout=300s deployment/mysql -n $(kubernetesNamespace) || true
+                
+                echo "Checking MySQL pod status..."
+                kubectl get pods -n $(kubernetesNamespace) -l app=mysql
+
+          - task: KubernetesManifest@0
+            displayName: 'Deploy WordPress'
+            inputs:
+              action: 'deploy'
+              kubernetesServiceConnection: '$(kubernetesServiceConnection)'
+              namespace: '$(kubernetesNamespace)'
+              manifests: |
+                kubernetes-manifests/wordpress.yaml
+
+          - task: Bash@3
+            displayName: 'Wait for WordPress to be Ready'
+            inputs:
+              targetType: 'inline'
+              script: |
+                echo "Waiting for WordPress deployment to be ready..."
+                kubectl wait --for=condition=available --timeout=300s deployment/wordpress -n $(kubernetesNamespace) || true
+                
+                echo "Checking WordPress pod status..."
+                kubectl get pods -n $(kubernetesNamespace) -l app=wordpress
+
+          - task: Bash@3
+            displayName: 'Get Deployment Status'
+            inputs:
+              targetType: 'inline'
+              script: |
+                echo "=== Deployment Summary ==="
+                echo "Namespace: $(kubernetesNamespace)"
+                echo ""
+                
+                echo "=== Deployments ==="
+                kubectl get deployments -n $(kubernetesNamespace)
+                echo ""
+                
+                echo "=== Services ==="
+                kubectl get services -n $(kubernetesNamespace)
+                echo ""
+                
+                echo "=== Pods ==="
+                kubectl get pods -n $(kubernetesNamespace)
+                echo ""
+                
+                echo "=== Persistent Volumes ==="
+                kubectl get pv
+                echo ""
+                
+                echo "=== Persistent Volume Claims ==="
+                kubectl get pvc -n $(kubernetesNamespace)
+                echo ""
+                
+                # Get external IP if WordPress service is LoadBalancer type
+                WORDPRESS_SERVICE=$(kubectl get service wordpress -n $(kubernetesNamespace) -o jsonpath='{.spec.type}' 2>/dev/null || echo "NotFound")
+                if [ "$WORDPRESS_SERVICE" = "LoadBalancer" ]; then
+                  echo "=== WordPress External Access ==="
+                  echo "Waiting for external IP..."
+                  kubectl get service wordpress -n $(kubernetesNamespace) --watch-only=false
+                  
+                  EXTERNAL_IP=$(kubectl get service wordpress -n $(kubernetesNamespace) -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "Pending")
+                  if [ "$EXTERNAL_IP" != "Pending" ] && [ "$EXTERNAL_IP" != "" ]; then
+                    echo "WordPress is accessible at: http://$EXTERNAL_IP"
+                  else
+                    echo "External IP is still pending. Check status with: kubectl get service wordpress -n $(kubernetesNamespace)"
+                  fi
+                fi
+
+- stage: HealthCheck
+  displayName: 'Health Check'
+  dependsOn: Deploy
+  condition: succeeded()
+  jobs:
+  - job: HealthCheck
+    displayName: 'Verify Deployment Health'
     steps:
-    
-    - task: DownloadBuildArtifacts@0
-      displayName: 'Download Helm Charts'
+    - task: AzureCLI@2
+      displayName: 'Run Health Checks'
       inputs:
-        buildType: 'current'
-        downloadType: 'single'
-        artifactName: 'helm-charts'
-        downloadPath: '$(System.ArtifactsDirectory)'
-    
-    - task: HelmInstaller@0
-      displayName: 'Install Helm'
-      inputs:
-        helmVersion: 'latest'
-    
-    # Create namespace first
-    - task: KubernetesManifest@0
-      displayName: 'Create WordPress Namespace'
-      inputs:
-        action: 'deploy'
-        kubernetesServiceConnection: 'aks-kubernetes-svc'
-        manifests: |
-          kubernetes-manifests/namespace.yaml
-    
-    # Deploy MySQL using Helm
-    - task: HelmDeploy@0
-      displayName: 'Deploy MySQL Helm Chart'
-      inputs:
-        connectionType: 'Kubernetes Service Connection'
-        kubernetesServiceConnection: 'aks-kubernetes-svc'
-        namespace: '$(NAMESPACE)'
-        command: 'upgrade'
-        chartType: 'FilePath'
-        chartPath: '$(System.ArtifactsDirectory)/helm-charts/mysql'
-        releaseName: 'mysql-release'
-        arguments: '--install --wait --timeout=300s'
-        valueFile: '$(System.ArtifactsDirectory)/helm-charts/mysql/values.yaml'
-    
-    # Wait for MySQL to be ready
-    - task: Bash@3
-      displayName: 'Wait for MySQL to be ready'
-      inputs:
-        targetType: 'inline'
-        script: |
-          echo "Waiting for MySQL pods to be ready..."
-          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=mysql -n $(NAMESPACE) --timeout=300s
-    
-    # Deploy WordPress using Helm
-    - task: HelmDeploy@0
-      displayName: 'Deploy WordPress Helm Chart'
-      inputs:
-        connectionType: 'Kubernetes Service Connection'
-        kubernetesServiceConnection: 'aks-kubernetes-svc'
-        namespace: '$(NAMESPACE)'
-        command: 'upgrade'
-        chartType: 'FilePath'
-        chartPath: '$(System.ArtifactsDirectory)/helm-charts/wordpress'
-        releaseName: 'wordpress-release'
-        arguments: '--install --wait --timeout=300s'
-        valueFile: '$(System.ArtifactsDirectory)/helm-charts/wordpress/values.yaml'
-    
-    # Verify deployments
-    - task: Bash@3
-      displayName: 'Verify Helm Deployments'
-      inputs:
-        targetType: 'inline'
-        script: |
-          echo "=== Helm Releases ==="
-          helm list -n $(NAMESPACE)
+        azureSubscription: '$(azureServiceConnection)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "Getting AKS credentials for health check..."
+          az aks get-credentials --resource-group $(resourceGroupName) --name $(aksClusterName) --overwrite-existing
           
-          echo "=== Pods Status ==="
-          kubectl get pods -n $(NAMESPACE)
+          echo "=== Health Check Results ==="
           
-          echo "=== Services ==="
-          kubectl get svc -n $(NAMESPACE)
-          
-          echo "=== Ingress (if any) ==="
-          kubectl get ingress -n $(NAMESPACE) || echo "No ingress found"
-          
-          echo "=== WordPress URL ==="
-          WORDPRESS_SVC=$(kubectl get svc -n $(NAMESPACE) -l app.kubernetes.io/name=wordpress -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}')
-          if [ ! -z "$WORDPRESS_SVC" ]; then
-            echo "WordPress is accessible at: http://$WORDPRESS_SVC"
+          # Check if namespace exists
+          if kubectl get namespace $(kubernetesNamespace) >/dev/null 2>&1; then
+            echo "✅ Namespace '$(kubernetesNamespace)' exists"
           else
-            echo "WordPress service is not yet accessible externally"
+            echo "❌ Namespace '$(kubernetesNamespace)' not found"
+            exit 1
           fi
+          
+          # Check MySQL deployment
+          MYSQL_READY=$(kubectl get deployment mysql -n $(kubernetesNamespace) -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+          MYSQL_DESIRED=$(kubectl get deployment mysql -n $(kubernetesNamespace) -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+          
+          if [ "$MYSQL_READY" = "$MYSQL_DESIRED" ] && [ "$MYSQL_READY" != "0" ]; then
+            echo "✅ MySQL deployment is healthy ($MYSQL_READY/$MYSQL_DESIRED replicas ready)"
+          else
+            echo "❌ MySQL deployment is unhealthy ($MYSQL_READY/$MYSQL_DESIRED replicas ready)"
+          fi
+          
+          # Check WordPress deployment
+          WP_READY=$(kubectl get deployment wordpress -n $(kubernetesNamespace) -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+          WP_DESIRED=$(kubectl get deployment wordpress -n $(kubernetesNamespace) -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+          
+          if [ "$WP_READY" = "$WP_DESIRED" ] && [ "$WP_READY" != "0" ]; then
+            echo "✅ WordPress deployment is healthy ($WP_READY/$WP_DESIRED replicas ready)"
+          else
+            echo "❌ WordPress deployment is unhealthy ($WP_READY/$WP_DESIRED replicas ready)"
+          fi
+          
+          # Check services
+          if kubectl get service mysql -n $(kubernetesNamespace) >/dev/null 2>&1; then
+            echo "✅ MySQL service exists"
+          else
+            echo "❌ MySQL service not found"
+          fi
+          
+          if kubectl get service wordpress -n $(kubernetesNamespace) >/dev/null 2>&1; then
+            echo "✅ WordPress service exists"
+          else
+            echo "❌ WordPress service not found"
+          fi
+          
+          echo ""
+          echo "=== Final Status ==="
+          kubectl get all -n $(kubernetesNamespace)
