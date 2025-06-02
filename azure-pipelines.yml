@@ -1,0 +1,80 @@
+trigger:
+- main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+stages:
+- stage: Deploy
+  displayName: 'Deploy WordPress and MySQL to AKS'
+  jobs:
+  - job: DeployToAKS
+    displayName: 'Deploy Applications'
+    steps:
+    
+    # Create namespace first
+    - task: KubernetesManifest@0
+      displayName: 'Create WordPress Namespace'
+      inputs:
+        action: 'deploy'
+        kubernetesServiceConnection: 'aks-kubernetes-svc'
+        manifests: |
+          kubernetes-manifests/namespace.yaml
+    
+    # Deploy MySQL first (WordPress depends on it)
+    - task: KubernetesManifest@0
+      displayName: 'Deploy MySQL to AKS'
+      inputs:
+        action: 'deploy'
+        kubernetesServiceConnection: 'aks-kubernetes-svc'
+        namespace: 'wordpress'
+        manifests: |
+          kubernetes-manifests/mysql.yaml
+    
+    # Wait a moment for MySQL to initialize
+    - task: Bash@3
+      displayName: 'Wait for MySQL initialization'
+      inputs:
+        targetType: 'inline'
+        script: |
+          echo "Waiting 30 seconds for MySQL to initialize..."
+          sleep 30
+    
+    # Deploy WordPress
+    - task: KubernetesManifest@0
+      displayName: 'Deploy WordPress to AKS'
+      inputs:
+        action: 'deploy'
+        kubernetesServiceConnection: 'aks-kubernetes-svc'
+        namespace: 'wordpress'
+        manifests: |
+          kubernetes-manifests/wordpress.yaml
+    
+    # Verify deployments
+    - task: Kubernetes@1
+      displayName: 'Check MySQL pods'
+      inputs:
+        connectionType: 'Kubernetes Service Connection'
+        kubernetesServiceEndpoint: 'aks-kubernetes-svc'
+        namespace: 'wordpress'
+        command: 'get'
+        arguments: 'pods -l app=mysql'
+    
+    - task: Kubernetes@1
+      displayName: 'Check WordPress pods'
+      inputs:
+        connectionType: 'Kubernetes Service Connection'
+        kubernetesServiceEndpoint: 'aks-kubernetes-svc'
+        namespace: 'wordpress'
+        command: 'get'
+        arguments: 'pods -l app=wordpress'
+    
+    # Get service information
+    - task: Kubernetes@1
+      displayName: 'Get services'
+      inputs:
+        connectionType: 'Kubernetes Service Connection'
+        kubernetesServiceEndpoint: 'aks-kubernetes-svc'
+        namespace: 'wordpress'
+        command: 'get'
+        arguments: 'svc'
