@@ -4,13 +4,61 @@ trigger:
 pool:
   vmImage: 'ubuntu-latest'
 
+variables:
+  HELM_CHART_PATH: 'helm-charts'
+  NAMESPACE: 'wordpress'
+
 stages:
+- stage: Build
+  displayName: 'Build and Package Helm Charts'
+  jobs:
+  - job: PackageHelmCharts
+    displayName: 'Package Helm Charts'
+    steps:
+    - task: HelmInstaller@0
+      displayName: 'Install Helm'
+      inputs:
+        helmVersion: 'latest'
+    
+    - task: Bash@3
+      displayName: 'Validate Helm Charts'
+      inputs:
+        targetType: 'inline'
+        script: |
+          echo "Validating MySQL Helm Chart..."
+          helm lint $(HELM_CHART_PATH)/mysql
+          
+          echo "Validating WordPress Helm Chart..."
+          helm lint $(HELM_CHART_PATH)/wordpress
+    
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Helm Charts as Artifacts'
+      inputs:
+        pathToPublish: '$(HELM_CHART_PATH)'
+        artifactName: 'helm-charts'
+        publishLocation: 'Container'
+
 - stage: Deploy
-  displayName: 'Deploy WordPress and MySQL to AKS'
+  displayName: 'Deploy Helm Charts to AKS'
+  dependsOn: Build
+  condition: succeeded()
   jobs:
   - job: DeployToAKS
-    displayName: 'Deploy Applications'
+    displayName: 'Deploy to AKS Cluster'
     steps:
+    
+    - task: DownloadBuildArtifacts@0
+      displayName: 'Download Helm Charts'
+      inputs:
+        buildType: 'current'
+        downloadType: 'single'
+        artifactName: 'helm-charts'
+        downloadPath: '$(System.ArtifactsDirectory)'
+    
+    - task: HelmInstaller@0
+      displayName: 'Install Helm'
+      inputs:
+        helmVersion: 'latest'
     
     # Create namespace first
     - task: KubernetesManifest@0
@@ -21,60 +69,65 @@ stages:
         manifests: |
           kubernetes-manifests/namespace.yaml
     
-    # Deploy MySQL first (WordPress depends on it)
-    - task: KubernetesManifest@0
-      displayName: 'Deploy MySQL to AKS'
+    # Deploy MySQL using Helm
+    - task: HelmDeploy@0
+      displayName: 'Deploy MySQL Helm Chart'
       inputs:
-        action: 'deploy'
+        connectionType: 'Kubernetes Service Connection'
         kubernetesServiceConnection: 'aks-kubernetes-svc'
-        namespace: 'wordpress'
-        manifests: |
-          kubernetes-manifests/mysql.yaml
+        namespace: '$(NAMESPACE)'
+        command: 'upgrade'
+        chartType: 'FilePath'
+        chartPath: '$(System.ArtifactsDirectory)/helm-charts/mysql'
+        releaseName: 'mysql-release'
+        arguments: '--install --wait --timeout=300s'
+        valueFile: '$(System.ArtifactsDirectory)/helm-charts/mysql/values.yaml'
     
-    # Wait a moment for MySQL to initialize
+    # Wait for MySQL to be ready
     - task: Bash@3
-      displayName: 'Wait for MySQL initialization'
+      displayName: 'Wait for MySQL to be ready'
       inputs:
         targetType: 'inline'
         script: |
-          echo "Waiting 30 seconds for MySQL to initialize..."
-          sleep 30
+          echo "Waiting for MySQL pods to be ready..."
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=mysql -n $(NAMESPACE) --timeout=300s
     
-    # Deploy WordPress
-    - task: KubernetesManifest@0
-      displayName: 'Deploy WordPress to AKS'
+    # Deploy WordPress using Helm
+    - task: HelmDeploy@0
+      displayName: 'Deploy WordPress Helm Chart'
       inputs:
-        action: 'deploy'
+        connectionType: 'Kubernetes Service Connection'
         kubernetesServiceConnection: 'aks-kubernetes-svc'
-        namespace: 'wordpress'
-        manifests: |
-          kubernetes-manifests/wordpress.yaml
+        namespace: '$(NAMESPACE)'
+        command: 'upgrade'
+        chartType: 'FilePath'
+        chartPath: '$(System.ArtifactsDirectory)/helm-charts/wordpress'
+        releaseName: 'wordpress-release'
+        arguments: '--install --wait --timeout=300s'
+        valueFile: '$(System.ArtifactsDirectory)/helm-charts/wordpress/values.yaml'
     
     # Verify deployments
-    - task: Kubernetes@1
-      displayName: 'Check MySQL pods'
+    - task: Bash@3
+      displayName: 'Verify Helm Deployments'
       inputs:
-        connectionType: 'Kubernetes Service Connection'
-        kubernetesServiceEndpoint: 'aks-kubernetes-svc'
-        namespace: 'wordpress'
-        command: 'get'
-        arguments: 'pods -l app=mysql'
-    
-    - task: Kubernetes@1
-      displayName: 'Check WordPress pods'
-      inputs:
-        connectionType: 'Kubernetes Service Connection'
-        kubernetesServiceEndpoint: 'aks-kubernetes-svc'
-        namespace: 'wordpress'
-        command: 'get'
-        arguments: 'pods -l app=wordpress'
-    
-    # Get service information
-    - task: Kubernetes@1
-      displayName: 'Get services'
-      inputs:
-        connectionType: 'Kubernetes Service Connection'
-        kubernetesServiceEndpoint: 'aks-kubernetes-svc'
-        namespace: 'wordpress'
-        command: 'get'
-        arguments: 'svc'
+        targetType: 'inline'
+        script: |
+          echo "=== Helm Releases ==="
+          helm list -n $(NAMESPACE)
+          
+          echo "=== Pods Status ==="
+          kubectl get pods -n $(NAMESPACE)
+          
+          echo "=== Services ==="
+          kubectl get svc -n $(NAMESPACE)
+          
+          echo "=== Ingress (if any) ==="
+          kubectl get ingress -n $(NAMESPACE) || echo "No ingress found"
+          
+          echo "=== WordPress URL ==="
+          WORDPRESS_SVC=$(kubectl get svc -n $(NAMESPACE) -l app.kubernetes.io/name=wordpress -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}')
+          if [ ! -z "$WORDPRESS_SVC" ]; then
+            echo "WordPress is accessible at: http://$WORDPRESS_SVC"
+          else
+            echo "WordPress service is not yet accessible externally"
+          fi
