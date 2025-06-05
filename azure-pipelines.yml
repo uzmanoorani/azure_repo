@@ -17,9 +17,9 @@ variables:
   aksClusterName: 'ar-aks-cluster'
   resourceGroupName: 'Scaleops-ResourceGroup'
   # Kubernetes namespace
-  kubernetesNamespace: 'wordpress'
+  # kubernetesNamespace: 'wordpress'
   # Azure subscription
-  azureSubscription: '31a50802-420f-4807-abbf-dc56f9b7cec0'
+  azureSubscription: '986e1dc4-bba1-4499-a8cb-8ad3aadc86fc'
 
 pool:
   vmImage: 'ubuntu-latest'
