@@ -19,7 +19,7 @@ variables:
   # Kubernetes namespace
   # kubernetesNamespace: 'wordpress'
   # Azure subscription
-  azureSubscription: '986e1dc4-bba1-4499-a8cb-8ad3aadc86fc'
+  azureSubscription: 'Test-AzureRM-Connection'
 
 pool:
   vmImage: 'ubuntu-latest'
