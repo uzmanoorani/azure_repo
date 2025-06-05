@@ -16,9 +16,9 @@ variables:
   # AKS cluster details
   aksClusterName: 'ar-aks-cluster'
   resourceGroupName: 'Scaleops-ResourceGroup'
-  # Kubernetes namespace
-  # kubernetesNamespace: 'wordpress'
-  # Azure subscription
+  # Kubernetes namespace - FIXED: Uncommented this variable
+  kubernetesNamespace: 'wordpress'
+  # Azure subscription - FIXED: Use the same as azureServiceConnection
   azureSubscription: 'Test-AzureRM-Connection'
 
 pool:
