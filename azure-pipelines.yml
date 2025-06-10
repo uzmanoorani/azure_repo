@@ -20,7 +20,6 @@ variables:
   kubernetesNamespace: 'wordpress'
   # Azure subscription - FIXED: Use the same as azureServiceConnection
   azureSubscription: 'Test-AzureRM-Connection'
-
 pool:
   name: Default
 
