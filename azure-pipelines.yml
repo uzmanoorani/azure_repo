@@ -48,7 +48,7 @@ stages:
   dependsOn: Validate
   condition: succeeded()
   jobs:
-  - deployment: DeployWordPress
+  -  deployment: DeployWordPress
     displayName: 'Deploy WordPress to AKS'
     environment: 'AKS-Production'
     strategy:
@@ -60,7 +60,7 @@ stages:
           - task: AzureCLI@2
             displayName: 'Get AKS Credentials'
             inputs:
-              azureSubscription: '$(azureServiceConnection)'
+              azureSubscription: 'Test-AzureRM-Connection'
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               inlineScript: |
@@ -177,7 +177,7 @@ stages:
     - task: AzureCLI@2
       displayName: 'Run Health Checks'
       inputs:
-        azureSubscription: '$(azureServiceConnection)'
+        azureSubscription: 'Test-AzureRM-Connection'
         scriptType: 'bash'
         scriptLocation: 'inlineScript'
         inlineScript: |
