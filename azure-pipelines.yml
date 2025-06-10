@@ -51,7 +51,7 @@ stages:
   jobs:
   - deployment: DeployWordPress
     displayName: 'Deploy WordPress to AKS'
-    environment: 'AKS-Production'
+    # environment: 'AKS-Production'
     strategy:
       runOnce:
         deploy:
