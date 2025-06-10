@@ -44,6 +44,7 @@ stages:
           done
           echo "All YAML files are valid!"
 
+
 - stage: Deploy
   displayName: 'Deploy to AKS'
   dependsOn: Validate
