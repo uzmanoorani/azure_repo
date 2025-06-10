@@ -14,7 +14,7 @@ variables:
   # Kubernetes service connection name
   kubernetesServiceConnection: 'aks-kubernetes-svc'
   # AKS cluster details
-  
+
   aksClusterName: 'ar-aks-cluster'
   resourceGroupName: 'Scaleops-ResourceGroup'
   # Kubernetes namespace - FIXED: Uncommented this variable
@@ -23,6 +23,7 @@ variables:
   azureSubscription: 'Test-AzureRM-Connection'
 pool:
   name: Default
+
 
 stages:
 - stage: Validate
