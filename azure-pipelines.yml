@@ -48,7 +48,7 @@ stages:
   dependsOn: Validate
   condition: succeeded()
   jobs:
-  -  deployment: DeployWordPress
+  - deployment: DeployWordPress
     displayName: 'Deploy WordPress to AKS'
     environment: 'AKS-Production'
     strategy:
