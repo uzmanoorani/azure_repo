@@ -20,7 +20,7 @@ variables:
   # Kubernetes namespace - FIXED: Uncommented this variable
   kubernetesNamespace: 'wordpress'
   # Azure subscription - FIXED: Use the same as azureServiceConnection
-  azureSubscription: 'Test-AzureRM-Connection'
+  azureSubscription: 'uzma-aks-svc'
 pool:
   name: Default
 
@@ -62,7 +62,7 @@ stages:
           - task: AzureCLI@2
             displayName: 'Get AKS Credentials'
             inputs:
-              azureSubscription: 'Test-AzureRM-Connection'
+              azureSubscription: 'uzma-aks-svc'
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               inlineScript: |
@@ -179,7 +179,7 @@ stages:
     - task: AzureCLI@2
       displayName: 'Run Health Checks'
       inputs:
-        azureSubscription: 'Test-AzureRM-Connection'
+        azureSubscription: 'uzma-aks-svc'
         scriptType: 'bash'
         scriptLocation: 'inlineScript'
         inlineScript: |
