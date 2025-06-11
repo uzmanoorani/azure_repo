@@ -12,7 +12,7 @@ variables:
   # Azure Resource Manager connection name
   azureServiceConnection: 'Test-AzureRM-Connection'
   # Kubernetes service connection name
-  kubernetesServiceConnection: 'uzma-aks-svc'
+  kubernetesServiceConnection: 'aks-kubernetes-svc'
   # AKS cluster details
 
   aksClusterName: 'ar-aks-cluster'
@@ -232,3 +232,4 @@ stages:
           echo ""
           echo "=== Final Status ==="
           kubectl get all -n $(kubernetesNamespace)
+          
