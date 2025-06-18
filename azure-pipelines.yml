@@ -16,13 +16,13 @@ variables:
   # AKS cluster details
 
   aksClusterName: 'ar-aks-cluster'
-  resourceGroupName: 'Scaleops-ResourceGroup'
+  resourceGroupName: 'azdev_azure_workload'
   # Kubernetes namespace - FIXED: Uncommented this variable
   kubernetesNamespace: 'wordpress'
   # Azure subscription - FIXED: Use the same as azureServiceConnection
   azureSubscription: 'Test-AzureRM-Connection'
 pool:
-  name: Azure Pipelines
+  name: Default
 
 
 stages:
