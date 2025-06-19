@@ -259,3 +259,4 @@ stages:
           echo "=== Deployment Complete ==="
           echo "WordPress application has been successfully deployed to AKS!"
           echo "Monitor the application using: kubectl get all -n $(kubernetesNamespace)"
+          
