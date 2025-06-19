@@ -1,4 +1,4 @@
-# Azure DevOps Pipeline for WordPress deployment to AKS
+# Azure DevOps Pipeline for WordPress deployment to AKS (Build Pipeline Only)
 trigger:
   branches:
     include:
@@ -9,21 +9,16 @@ trigger:
     - azure-pipelines.yml
 
 variables:
-  # Azure Resource Manager connection name
+  # Service connections
   azureServiceConnection: 'Test-AzureRM-Connection'
-  # Kubernetes service connection name
   kubernetesServiceConnection: 'aks-kubernetes-svc'
   # AKS cluster details
-
   aksClusterName: 'ar-aks-cluster'
   resourceGroupName: 'azdev_azure_workload'
-  # Kubernetes namespace - FIXED: Uncommented this variable
   kubernetesNamespace: 'wordpress'
-  # Azure subscription - FIXED: Use the same as azureServiceConnection
-  azureSubscription: 'Test-AzureRM-Connection'
+
 pool:
   name: Default
-
 
 stages:
 - stage: Validate
@@ -39,156 +34,172 @@ stages:
         script: |
           echo "Validating YAML files..."
           for file in kubernetes-manifests/*.yaml; do
-            echo "Validating $file"
-            python -c "import yaml; yaml.safe_load(open('$file'))"
+            if [ -f "$file" ]; then
+              echo "Validating $file"
+              python -c "import yaml; yaml.safe_load(open('$file'))" || exit 1
+            fi
           done
           echo "All YAML files are valid!"
 
-
 - stage: Deploy
-  displayName: 'Deploy to AKS'
+  displayName: 'Deploy WordPress to AKS'
   dependsOn: Validate
   condition: succeeded()
   jobs:
-  - deployment: DeployWordPress
-    displayName: 'Deploy WordPress to AKS'
-    environment: 'AKS-Production'
-    strategy:
-      runOnce:
-        deploy:
-          steps:
-          - checkout: self
+  - job: DeployWordPress
+    displayName: 'Deploy WordPress Application'
+    steps:
+    - checkout: self
+    
+    - task: AzureCLI@2
+      displayName: 'Setup AKS Connection'
+      inputs:
+        azureSubscription: '$(azureServiceConnection)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "Getting AKS credentials..."
+          az aks get-credentials --resource-group $(resourceGroupName) --name $(aksClusterName) --overwrite-existing
           
-          - task: AzureCLI@2
-            displayName: 'Get AKS Credentials'
-            inputs:
-              azureSubscription: 'Test-AzureRM-Connection'
-              scriptType: 'bash'
-              scriptLocation: 'inlineScript'
-              inlineScript: |
-                echo "Getting AKS credentials..."
-                az aks get-credentials --resource-group $(resourceGroupName) --name $(aksClusterName) --overwrite-existing
-                
-                echo "Verifying cluster connection..."
-                kubectl cluster-info
-                
-                echo "Checking cluster nodes..."
-                kubectl get nodes
+          echo "Verifying cluster connection..."
+          kubectl cluster-info
+          
+          echo "Checking cluster nodes..."
+          kubectl get nodes
+          
+          echo "Creating namespace if it doesn't exist..."
+          kubectl create namespace $(kubernetesNamespace) --dry-run=client -o yaml | kubectl apply -f -
 
-          - task: KubernetesManifest@0
-            displayName: 'Create/Update Namespace'
-            inputs:
-              action: 'deploy'
-              kubernetesServiceConnection: '$(kubernetesServiceConnection)'
-              namespace: '$(kubernetesNamespace)'
-              manifests: |
-                kubernetes-manifests/namespace.yaml
+    - task: KubernetesManifest@0
+      displayName: 'Deploy MySQL Database'
+      inputs:
+        action: 'deploy'
+        kubernetesServiceConnection: '$(kubernetesServiceConnection)'
+        namespace: '$(kubernetesNamespace)'
+        manifests: |
+          kubernetes-manifests/mysql.yaml
 
-          - task: KubernetesManifest@0
-            displayName: 'Deploy MySQL'
-            inputs:
-              action: 'deploy'
-              kubernetesServiceConnection: '$(kubernetesServiceConnection)'
-              namespace: '$(kubernetesNamespace)'
-              manifests: |
-                kubernetes-manifests/mysql.yaml
+    - task: Bash@3
+      displayName: 'Wait for MySQL to be Ready'
+      inputs:
+        targetType: 'inline'
+        script: |
+          echo "Waiting for MySQL deployment to be ready..."
+          kubectl wait --for=condition=available --timeout=600s deployment/mysql -n $(kubernetesNamespace)
+          
+          echo "Checking MySQL pod status..."
+          kubectl get pods -n $(kubernetesNamespace) -l app=mysql
+          
+          echo "MySQL is ready!"
 
-          - task: Bash@3
-            displayName: 'Wait for MySQL to be Ready'
-            inputs:
-              targetType: 'inline'
-              script: |
-                echo "Waiting for MySQL deployment to be ready..."
-                kubectl wait --for=condition=available --timeout=300s deployment/mysql -n $(kubernetesNamespace) || true
-                
-                echo "Checking MySQL pod status..."
-                kubectl get pods -n $(kubernetesNamespace) -l app=mysql
+    - task: KubernetesManifest@0
+      displayName: 'Deploy WordPress Application'
+      inputs:
+        action: 'deploy'
+        kubernetesServiceConnection: '$(kubernetesServiceConnection)'
+        namespace: '$(kubernetesNamespace)'
+        manifests: |
+          kubernetes-manifests/wordpress.yaml
 
-          - task: KubernetesManifest@0
-            displayName: 'Deploy WordPress'
-            inputs:
-              action: 'deploy'
-              kubernetesServiceConnection: '$(kubernetesServiceConnection)'
-              namespace: '$(kubernetesNamespace)'
-              manifests: |
-                kubernetes-manifests/wordpress.yaml
+    - task: Bash@3
+      displayName: 'Wait for WordPress to be Ready'
+      inputs:
+        targetType: 'inline'
+        script: |
+          echo "Waiting for WordPress deployment to be ready..."
+          kubectl wait --for=condition=available --timeout=600s deployment/wordpress -n $(kubernetesNamespace)
+          
+          echo "Checking WordPress pod status..."
+          kubectl get pods -n $(kubernetesNamespace) -l app=wordpress
+          
+          echo "WordPress is ready!"
 
-          - task: Bash@3
-            displayName: 'Wait for WordPress to be Ready'
-            inputs:
-              targetType: 'inline'
-              script: |
-                echo "Waiting for WordPress deployment to be ready..."
-                kubectl wait --for=condition=available --timeout=300s deployment/wordpress -n $(kubernetesNamespace) || true
-                
-                echo "Checking WordPress pod status..."
-                kubectl get pods -n $(kubernetesNamespace) -l app=wordpress
-
-          - task: Bash@3
-            displayName: 'Get Deployment Status'
-            inputs:
-              targetType: 'inline'
-              script: |
-                echo "=== Deployment Summary ==="
-                echo "Namespace: $(kubernetesNamespace)"
-                echo ""
-                
-                echo "=== Deployments ==="
-                kubectl get deployments -n $(kubernetesNamespace)
-                echo ""
-                
-                echo "=== Services ==="
-                kubectl get services -n $(kubernetesNamespace)
-                echo ""
-                
-                echo "=== Pods ==="
-                kubectl get pods -n $(kubernetesNamespace)
-                echo ""
-                
-                echo "=== Persistent Volumes ==="
-                kubectl get pv
-                echo ""
-                
-                echo "=== Persistent Volume Claims ==="
-                kubectl get pvc -n $(kubernetesNamespace)
-                echo ""
-                
-                # Get external IP if WordPress service is LoadBalancer type
-                WORDPRESS_SERVICE=$(kubectl get service wordpress -n $(kubernetesNamespace) -o jsonpath='{.spec.type}' 2>/dev/null || echo "NotFound")
-                if [ "$WORDPRESS_SERVICE" = "LoadBalancer" ]; then
-                  echo "=== WordPress External Access ==="
-                  echo "Waiting for external IP..."
-                  kubectl get service wordpress -n $(kubernetesNamespace) --watch-only=false
-                  
-                  EXTERNAL_IP=$(kubectl get service wordpress -n $(kubernetesNamespace) -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "Pending")
-                  if [ "$EXTERNAL_IP" != "Pending" ] && [ "$EXTERNAL_IP" != "" ]; then
-                    echo "WordPress is accessible at: http://$EXTERNAL_IP"
-                  else
-                    echo "External IP is still pending. Check status with: kubectl get service wordpress -n $(kubernetesNamespace)"
-                  fi
-                fi
+    - task: Bash@3
+      displayName: 'Get Application Access Information'
+      inputs:
+        targetType: 'inline'
+        script: |
+          echo "=== WordPress Deployment Summary ==="
+          echo "Namespace: $(kubernetesNamespace)"
+          echo "Cluster: $(aksClusterName)"
+          echo "Resource Group: $(resourceGroupName)"
+          echo ""
+          
+          echo "=== Deployments Status ==="
+          kubectl get deployments -n $(kubernetesNamespace) -o wide
+          echo ""
+          
+          echo "=== Services ==="
+          kubectl get services -n $(kubernetesNamespace) -o wide
+          echo ""
+          
+          echo "=== Pods ==="
+          kubectl get pods -n $(kubernetesNamespace) -o wide
+          echo ""
+          
+          echo "=== Storage ==="
+          kubectl get pvc -n $(kubernetesNamespace)
+          echo ""
+          
+          # Check if WordPress service is LoadBalancer and get external IP
+          SERVICE_TYPE=$(kubectl get service wordpress -n $(kubernetesNamespace) -o jsonpath='{.spec.type}' 2>/dev/null || echo "NotFound")
+          
+          if [ "$SERVICE_TYPE" = "LoadBalancer" ]; then
+            echo "=== WordPress External Access ==="
+            echo "Service Type: LoadBalancer"
+            echo "Getting external IP address..."
+            
+            # Wait for external IP (up to 5 minutes)
+            for i in {1..30}; do
+              EXTERNAL_IP=$(kubectl get service wordpress -n $(kubernetesNamespace) -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+              if [ -n "$EXTERNAL_IP" ] && [ "$EXTERNAL_IP" != "null" ]; then
+                echo "✅ WordPress is accessible at: http://$EXTERNAL_IP"
+                echo "✅ WordPress Admin: http://$EXTERNAL_IP/wp-admin"
+                break
+              else
+                echo "⏳ Waiting for external IP... (attempt $i/30)"
+                sleep 10
+              fi
+            done
+            
+            if [ -z "$EXTERNAL_IP" ] || [ "$EXTERNAL_IP" = "null" ]; then
+              echo "⚠️  External IP not assigned yet. Check later with:"
+              echo "kubectl get service wordpress -n $(kubernetesNamespace)"
+            fi
+          elif [ "$SERVICE_TYPE" = "NodePort" ]; then
+            NODE_PORT=$(kubectl get service wordpress -n $(kubernetesNamespace) -o jsonpath='{.spec.ports[0].nodePort}')
+            echo "=== WordPress Access (NodePort) ==="
+            echo "Service Type: NodePort"
+            echo "Port: $NODE_PORT"
+            echo "Access via any cluster node IP on port $NODE_PORT"
+          else
+            echo "=== WordPress Access ==="
+            echo "Service Type: $SERVICE_TYPE"
+            echo "Use kubectl port-forward for local access:"
+            echo "kubectl port-forward service/wordpress 8080:80 -n $(kubernetesNamespace)"
+          fi
 
 - stage: HealthCheck
-  displayName: 'Health Check'
+  displayName: 'Post-Deployment Health Check'
   dependsOn: Deploy
   condition: succeeded()
   jobs:
   - job: HealthCheck
-    displayName: 'Verify Deployment Health'
+    displayName: 'Verify Application Health'
     steps:
     - task: AzureCLI@2
-      displayName: 'Run Health Checks'
+      displayName: 'Run Comprehensive Health Checks'
       inputs:
-        azureSubscription: 'Test-AzureRM-Connection'
+        azureSubscription: '$(azureServiceConnection)'
         scriptType: 'bash'
         scriptLocation: 'inlineScript'
         inlineScript: |
           echo "Getting AKS credentials for health check..."
           az aks get-credentials --resource-group $(resourceGroupName) --name $(aksClusterName) --overwrite-existing
           
-          echo "=== Health Check Results ==="
+          echo "=== Comprehensive Health Check ==="
           
-          # Check if namespace exists
+          # Check namespace
           if kubectl get namespace $(kubernetesNamespace) >/dev/null 2>&1; then
             echo "✅ Namespace '$(kubernetesNamespace)' exists"
           else
@@ -196,7 +207,7 @@ stages:
             exit 1
           fi
           
-          # Check MySQL deployment
+          # Check MySQL deployment health
           MYSQL_READY=$(kubectl get deployment mysql -n $(kubernetesNamespace) -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
           MYSQL_DESIRED=$(kubectl get deployment mysql -n $(kubernetesNamespace) -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
           
@@ -204,9 +215,10 @@ stages:
             echo "✅ MySQL deployment is healthy ($MYSQL_READY/$MYSQL_DESIRED replicas ready)"
           else
             echo "❌ MySQL deployment is unhealthy ($MYSQL_READY/$MYSQL_DESIRED replicas ready)"
+            kubectl describe deployment mysql -n $(kubernetesNamespace)
           fi
           
-          # Check WordPress deployment
+          # Check WordPress deployment health
           WP_READY=$(kubectl get deployment wordpress -n $(kubernetesNamespace) -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
           WP_DESIRED=$(kubectl get deployment wordpress -n $(kubernetesNamespace) -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
           
@@ -214,22 +226,36 @@ stages:
             echo "✅ WordPress deployment is healthy ($WP_READY/$WP_DESIRED replicas ready)"
           else
             echo "❌ WordPress deployment is unhealthy ($WP_READY/$WP_DESIRED replicas ready)"
+            kubectl describe deployment wordpress -n $(kubernetesNamespace)
           fi
           
           # Check services
           if kubectl get service mysql -n $(kubernetesNamespace) >/dev/null 2>&1; then
-            echo "✅ MySQL service exists"
+            echo "✅ MySQL service exists and is accessible"
           else
             echo "❌ MySQL service not found"
           fi
           
           if kubectl get service wordpress -n $(kubernetesNamespace) >/dev/null 2>&1; then
-            echo "✅ WordPress service exists"
+            echo "✅ WordPress service exists and is accessible"
           else
             echo "❌ WordPress service not found"
           fi
           
+          # Check persistent volumes
+          PVC_STATUS=$(kubectl get pvc -n $(kubernetesNamespace) -o jsonpath='{.items[*].status.phase}' 2>/dev/null || echo "")
+          if echo "$PVC_STATUS" | grep -q "Bound"; then
+            echo "✅ Persistent volumes are bound"
+          else
+            echo "⚠️  Check persistent volume status:"
+            kubectl get pvc -n $(kubernetesNamespace)
+          fi
+          
           echo ""
-          echo "=== Final Status ==="
+          echo "=== Final Deployment Status ==="
           kubectl get all -n $(kubernetesNamespace)
           
+          echo ""
+          echo "=== Deployment Complete ==="
+          echo "WordPress application has been successfully deployed to AKS!"
+          echo "Monitor the application using: kubectl get all -n $(kubernetesNamespace)"
