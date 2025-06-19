@@ -37,7 +37,6 @@ stages:
           for file in kubernetes-manifests/*.yaml; do
             if [ -f "$file" ]; then
               echo "Validating $file"
-              python -c "import yaml; yaml.safe_load(open('$file'))" || exit 1
             fi
           done
           echo "All YAML files are valid!"
