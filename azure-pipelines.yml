@@ -20,7 +20,6 @@ variables:
 pool:
   name: Default
 
-
 stages:
 - stage: Validate
   displayName: 'Validate Kubernetes Manifests'
