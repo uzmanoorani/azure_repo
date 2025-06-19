@@ -54,7 +54,7 @@ stages:
     - task: AzureCLI@2
       displayName: 'Setup AKS Connection'
       inputs:
-        azureSubscription: '$(azureServiceConnection)'
+        azureSubscription: 'Test-AzureRM-Connection'
         scriptType: 'bash'
         scriptLocation: 'inlineScript'
         inlineScript: |
@@ -190,7 +190,7 @@ stages:
     - task: AzureCLI@2
       displayName: 'Run Comprehensive Health Checks'
       inputs:
-        azureSubscription: '$(azureServiceConnection)'
+        azureSubscription: 'Test-AzureRM-Connection'
         scriptType: 'bash'
         scriptLocation: 'inlineScript'
         inlineScript: |
