@@ -17,6 +17,7 @@ variables:
   resourceGroupName: 'dg_azure_workload'
   kubernetesNamespace: 'wordpress'
 
+
 pool:
   name: Default
 
