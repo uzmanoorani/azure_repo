@@ -16,7 +16,6 @@ variables:
   aksClusterName: 'ar-aks-cluster'
   resourceGroupName: 'dg_azure_workload'
   kubernetesNamespace: 'wordpress'
-
 pool:
   name: Default
 
