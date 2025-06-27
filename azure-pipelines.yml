@@ -71,7 +71,7 @@ stages:
       displayName: 'Deploy MySQL Database'
       inputs:
         action: 'deploy'
-        kubernetesServiceConnection: '$(kubernetesServiceConnection)'
+        kubernetesServiceConnection: 'aks-kubernetes-svc'
         namespace: '$(kubernetesNamespace)'
         manifests: |
           kubernetes-manifests/mysql.yaml
@@ -93,7 +93,7 @@ stages:
       displayName: 'Deploy WordPress Application'
       inputs:
         action: 'deploy'
-        kubernetesServiceConnection: '$(kubernetesServiceConnection)'
+        kubernetesServiceConnection: 'aks-kubernetes-svc'
         namespace: '$(kubernetesNamespace)'
         manifests: |
           kubernetes-manifests/wordpress.yaml
