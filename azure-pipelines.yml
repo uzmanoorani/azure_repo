@@ -111,6 +111,7 @@ stages:
           
           echo "WordPress is ready!"
 
+
     - task: Bash@3
       displayName: 'Get Application Access Information'
       inputs:
