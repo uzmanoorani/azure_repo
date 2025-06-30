@@ -177,6 +177,7 @@ stages:
             echo "kubectl port-forward service/wordpress 8080:80 -n $(kubernetesNamespace)"
           fi
 
+
 - stage: HealthCheck
   displayName: 'Post-Deployment Health Check'
   dependsOn: Deploy
