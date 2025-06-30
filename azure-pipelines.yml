@@ -17,7 +17,7 @@ variables:
   resourceGroupName: 'azdev_azure_workload'
   kubernetesNamespace: 'wordpress'
 pool:
-  name: Azure Pipelines
+  name: Default
 
 stages:
 - stage: Validate
