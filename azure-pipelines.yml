@@ -13,8 +13,8 @@ variables:
   azureServiceConnection: 'Test-AzureRM-Connection'
   kubernetesServiceConnection: 'aks-kubernetes-svc'
   # AKS cluster details
-  aksClusterName: 'my-aks-cluster'
-  resourceGroupName: 'azuredev_azure_workload'
+  aksClusterName: 'ar-aks-cluster'
+  resourceGroupName: 'azdev_azure_workload'
   kubernetesNamespace: 'wordpress'
 pool:
   name: Default
