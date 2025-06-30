@@ -19,7 +19,6 @@ variables:
 pool:
   name: Azure Pipelines
 
-
 stages:
 - stage: Validate
   displayName: 'Validate Kubernetes Manifests'
