@@ -1,16 +1,4 @@
 apiVersion: v1
-kind: Secret
-metadata:
-  name: mysql-secret
-type: Opaque
-data:
-  # root password: rootpassword123 (base64 encoded)
-  mysql-root-password: uzma@1000
-  # database password: wppassword123 (base64 encoded)
-  mysql-password: uzma@1000
-
----
-apiVersion: v1
 kind: ConfigMap
 metadata:
   name: mysql-config
