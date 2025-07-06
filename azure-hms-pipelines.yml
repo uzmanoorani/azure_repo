@@ -16,7 +16,7 @@ variables:
   # AKS cluster details
   aksClusterName: 'ar-aks-cluster'
   resourceGroupName: 'Scaleops-ResourceGroup'
-  kubernetesNamespace: 'wordpress'
+  kubernetesNamespace: 'django'
 pool:
   name: Default
 stages:
