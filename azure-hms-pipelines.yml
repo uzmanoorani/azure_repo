@@ -8,6 +8,7 @@ trigger:
     - kubernetes-manifests/*
     - azure-pipelines.yml
 
+
 variables:
   # Service connections
   azureServiceConnection: 'Test-AzureRM-Connection'
@@ -18,7 +19,6 @@ variables:
   kubernetesNamespace: 'wordpress'
 pool:
   name: Default
-
 stages:
 - stage: Validate
   displayName: 'Validate Kubernetes Manifests'
@@ -32,7 +32,7 @@ stages:
         targetType: 'inline'
         script: |
           echo "Validating YAML files..."
-          for file in kubernetes-manifests/*.yaml; do
+          for file in hms-manifests/*.yaml; do
             if [ -f "$file" ]; then
               echo "Validating $file"
             fi
@@ -64,7 +64,6 @@ stages:
           echo "Checking cluster nodes..."
           kubectl get nodes
           
-          
           echo "Creating namespace if it doesn't exist..."
           kubectl create namespace $(kubernetesNamespace) --dry-run=client -o yaml | kubectl apply -f -
 
@@ -75,7 +74,7 @@ stages:
         kubernetesServiceConnection: 'aks-kubernetes-svc'
         namespace: '$(kubernetesNamespace)'
         manifests: |
-          kubernetes-manifests/mysql.yaml
+          hms-manifests/mysql.yaml
 
     - task: Bash@3
       displayName: 'Wait for MySQL to be Ready'
@@ -91,26 +90,29 @@ stages:
           echo "MySQL is ready!"
 
     - task: KubernetesManifest@0
-      displayName: 'Deploy WordPress Application'
+      displayName: 'Deploy Django Application'
       inputs:
         action: 'deploy'
         kubernetesServiceConnection: 'aks-kubernetes-svc'
         namespace: '$(kubernetesNamespace)'
         manifests: |
-          kubernetes-manifests/wordpress.yaml
+          hms-manifests/deployment.yaml
+          hms-manifests/sa.yaml
+          hms-manifests/django-service.yaml
+          
 
     - task: Bash@3
-      displayName: 'Wait for WordPress to be Ready'
+      displayName: 'Wait for Django to be Ready'
       inputs:
         targetType: 'inline'
         script: |
-          echo "Waiting for WordPress deployment to be ready..."
-          kubectl wait --for=condition=available --timeout=600s deployment/wordpress -n $(kubernetesNamespace)
+          echo "Waiting for Django deployment to be ready..."
+          kubectl wait --for=condition=available --timeout=600s deployment/django-app -n $(kubernetesNamespace)
           
           echo "Checking WordPress pod status..."
-          kubectl get pods -n $(kubernetesNamespace) -l app=wordpress
+          kubectl get pods -n $(kubernetesNamespace) -l app=django
           
-          echo "WordPress is ready!"
+          echo "Django is ready!"
 
 
     - task: Bash@3
@@ -118,7 +120,7 @@ stages:
       inputs:
         targetType: 'inline'
         script: |
-          echo "=== WordPress Deployment Summary ==="
+          echo "=== Django Deployment Summary ==="
           echo "Namespace: $(kubernetesNamespace)"
           echo "Cluster: $(aksClusterName)"
           echo "Resource Group: $(resourceGroupName)"
@@ -141,7 +143,7 @@ stages:
           echo ""
           
           # Check if WordPress service is LoadBalancer and get external IP
-          SERVICE_TYPE=$(kubectl get service wordpress -n $(kubernetesNamespace) -o jsonpath='{.spec.type}' 2>/dev/null || echo "NotFound")
+          SERVICE_TYPE=$(kubectl get service django-service -n $(kubernetesNamespace) -o jsonpath='{.spec.type}' 2>/dev/null || echo "NotFound")
           
           if [ "$SERVICE_TYPE" = "LoadBalancer" ]; then
             echo "=== WordPress External Access ==="
@@ -150,10 +152,10 @@ stages:
             
             # Wait for external IP (up to 5 minutes)
             for i in {1..30}; do
-              EXTERNAL_IP=$(kubectl get service wordpress -n $(kubernetesNamespace) -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+              EXTERNAL_IP=$(kubectl get service django-service -n $(kubernetesNamespace) -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
               if [ -n "$EXTERNAL_IP" ] && [ "$EXTERNAL_IP" != "null" ]; then
-                echo "✅ WordPress is accessible at: http://$EXTERNAL_IP"
-                echo "✅ WordPress Admin: http://$EXTERNAL_IP/wp-admin"
+                echo "✅ WordPress is accessible at: http://$EXTERNAL_IP:8000"
+                
                 break
               else
                 echo "⏳ Waiting for external IP... (attempt $i/30)"
@@ -163,11 +165,11 @@ stages:
             
             if [ -z "$EXTERNAL_IP" ] || [ "$EXTERNAL_IP" = "null" ]; then
               echo "⚠️  External IP not assigned yet. Check later with:"
-              echo "kubectl get service wordpress -n $(kubernetesNamespace)"
+              echo "kubectl get service django-service -n $(kubernetesNamespace)"
             fi
           elif [ "$SERVICE_TYPE" = "NodePort" ]; then
-            NODE_PORT=$(kubectl get service wordpress -n $(kubernetesNamespace) -o jsonpath='{.spec.ports[0].nodePort}')
-            echo "=== WordPress Access (NodePort) ==="
+            NODE_PORT=$(kubectl get service django-service -n $(kubernetesNamespace) -o jsonpath='{.spec.ports[0].nodePort}')
+            echo "=== Django Access (NodePort) ==="
             echo "Service Type: NodePort"
             echo "Port: $NODE_PORT"
             echo "Access via any cluster node IP on port $NODE_PORT"
@@ -175,7 +177,7 @@ stages:
             echo "=== WordPress Access ==="
             echo "Service Type: $SERVICE_TYPE"
             echo "Use kubectl port-forward for local access:"
-            echo "kubectl port-forward service/wordpress 8080:80 -n $(kubernetesNamespace)"
+            echo "kubectl port-forward service/django-service 8080:80 -n $(kubernetesNamespace)"
           fi
 
 
@@ -219,14 +221,14 @@ stages:
           fi
           
           # Check WordPress deployment health
-          WP_READY=$(kubectl get deployment wordpress -n $(kubernetesNamespace) -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
-          WP_DESIRED=$(kubectl get deployment wordpress -n $(kubernetesNamespace) -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+          WP_READY=$(kubectl get deployment django-app -n $(kubernetesNamespace) -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+          WP_DESIRED=$(kubectl get deployment django-app -n $(kubernetesNamespace) -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
           
           if [ "$WP_READY" = "$WP_DESIRED" ] && [ "$WP_READY" != "0" ]; then
             echo "✅ WordPress deployment is healthy ($WP_READY/$WP_DESIRED replicas ready)"
           else
             echo "❌ WordPress deployment is unhealthy ($WP_READY/$WP_DESIRED replicas ready)"
-            kubectl describe deployment wordpress -n $(kubernetesNamespace)
+            kubectl describe deployment django-app -n $(kubernetesNamespace)
           fi
           
           # Check services
@@ -236,7 +238,7 @@ stages:
             echo "❌ MySQL service not found"
           fi
           
-          if kubectl get service wordpress -n $(kubernetesNamespace) >/dev/null 2>&1; then
+          if kubectl get service django-service -n $(kubernetesNamespace) >/dev/null 2>&1; then
             echo "✅ WordPress service exists and is accessible"
           else
             echo "❌ WordPress service not found"
@@ -257,6 +259,6 @@ stages:
           
           echo ""
           echo "=== Deployment Complete ==="
-          echo "WordPress application has been successfully deployed to AKS!"
+          echo "Django application has been successfully deployed to AKS!"
           echo "Monitor the application using: kubectl get all -n $(kubernetesNamespace)"
           
