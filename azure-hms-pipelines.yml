@@ -15,7 +15,7 @@ variables:
   kubernetesServiceConnection: 'aks-kubernetes-svc'
   # AKS cluster details
   aksClusterName: 'ar-aks-cluster'
-  resourceGroupName: 'azdev_azure_workload'
+  resourceGroupName: 'Scaleops-ResourceGroup'
   kubernetesNamespace: 'wordpress'
 pool:
   name: Default
