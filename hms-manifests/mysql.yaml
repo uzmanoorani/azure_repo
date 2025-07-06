@@ -53,10 +53,7 @@ spec:
         image: mysql:8.0
         env:
         - name: MYSQL_ROOT_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: mysql-secret
-              key: mysql-root-password
+          value: uzma@1000
         - name: MYSQL_DATABASE
           valueFrom:
             configMapKeyRef:
@@ -68,10 +65,7 @@ spec:
               name: mysql-config
               key: mysql-user
         - name: MYSQL_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: mysql-secret
-              key: mysql-password
+          value: uzma@1000
         ports:
         - containerPort: 3306
           name: mysql
