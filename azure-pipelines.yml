@@ -64,7 +64,6 @@ stages:
           echo "Checking cluster nodes..."
           kubectl get nodes
           
-          
           echo "Creating namespace if it doesn't exist..."
           kubectl create namespace $(kubernetesNamespace) --dry-run=client -o yaml | kubectl apply -f -
 
