@@ -5,8 +5,8 @@ trigger:
     - main
   paths:
     include:
-    - kubernetes-manifests/*
-    - azure-pipelines.yml
+    - hms-manifests/*
+    - azure-hms-pipelines.yml
 
 
 variables:
