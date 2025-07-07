@@ -25,7 +25,7 @@ spec:
         - name: RDS_PASSWORD
           value: "uzma@1000"
         - name: RDS_ENDPOINT
-          value: mysql-service:3306
+          value: mysql://ltscale:uzma@1000@mysql-service:3306/django
         resources:
           requests:
             memory: "512Mi"
