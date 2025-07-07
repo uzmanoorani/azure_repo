@@ -40,12 +40,12 @@ stages:
           echo "All YAML files are valid!"
 
 - stage: Deploy
-  displayName: 'Deploy WordPress to AKS'
+  displayName: 'Deploy Django to AKS'
   dependsOn: Validate
   condition: succeeded()
   jobs:
-  - job: DeployWordPress
-    displayName: 'Deploy WordPress Application'
+  - job: DeployDjango
+    displayName: 'Deploy Django Application'
     steps:
     - checkout: self
     
